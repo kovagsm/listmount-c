@@ -3,13 +3,11 @@
 #include <syscall.h>
 #include <sys/fcntl.h>
 #include <cstdio>
-#include <csignal>
 #include <dirent.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <sched.h>
+#include "string.h"
 #include <errno.h>
 
 #define SYS_statmount 457
@@ -17,6 +15,13 @@
 #define LSMT_ROOT 0xffffffffffffffff
 
 #define BUF_SIZE 255
+
+#define STATMOUNT_SB_BASIC       0x00000001U
+#define STATMOUNT_MNT_BASIC      0x00000002U
+#define STATMOUNT_PROPAGATE_FROM 0x00000004U
+#define STATMOUNT_MNT_ROOT       0x00000008U
+#define STATMOUNT_MNT_POINT      0x00000010U
+#define STATMOUNT_FS_TYPE        0x00000020U
 
 int listmount(const struct mnt_id_req *req, uint64_t *mnt_ids, size_t nr_mnt_ids, unsigned long flags) {
     return syscall(SYS_listmount, req, mnt_ids, nr_mnt_ids, flags);
@@ -155,6 +160,47 @@ uint64_t get_inode_from_path(char *path) {
     return 0;
 }
 
+void print_stat(struct statmount* sm) {
+    // Super block basic info
+    if (sm->sb_flags & STATMOUNT_SB_BASIC) {
+        printf("=== Super Block Info ===\n");
+        printf("Device: %d : %d\n", sm->sb_dev_major, sm->sb_dev_minor);
+        printf("Magic: %d\n", sm->sb_magic);
+        printf("Flags: %d\n", sm->sb_flags);
+    }
+
+    if (sm->mask & STATMOUNT_MNT_BASIC) {
+        printf("=== Mount Info ===\n");
+        printf("Mount ID (unique): %llu\n", sm->mnt_id);
+        printf("Mount ID (old): %u\n", sm->mnt_id_old);
+        printf("Parent ID (unique): %llu\n", sm->mnt_parent_id);
+        printf("Parent ID (old): %u\n", sm->mnt_parent_id_old);
+        printf("Mount attributes: %llu\n", sm->mnt_attr);
+        printf("Propagation flags: %llu\n", sm->mnt_propagation);
+        printf("Peer group: %llu\n", sm->mnt_peer_group);
+        printf("Master: %llu\n", sm->mnt_master);
+    }
+
+    if (sm->mask & STATMOUNT_PROPAGATE_FROM) {
+        printf("=== Propagation Info ===\n");
+        printf("Propagate from: %llu\n", sm->propagate_from);
+    }
+
+    printf("=== Paths and Types ===\n");
+
+    if (sm->mask & STATMOUNT_MNT_POINT) {
+        printf("Mount point: %s\n", (sm->str + sm->mnt_point));
+    }
+
+    if (sm->mask & STATMOUNT_MNT_ROOT) {
+        printf("Mount root: %s\n", (sm->str + sm->mnt_root));
+    }
+
+    if (sm->mask & STATMOUNT_FS_TYPE) {
+        printf("Filesystem type: %s\n", (sm->str + sm->fs_type));
+    }
+}
+
 void list_mounts_for_ns(int fd) {
     int res = setns(fd, 0);
     if (res != 0) {
@@ -175,8 +221,33 @@ void list_mounts_for_ns(int fd) {
         return;
     }
 
+    const size_t stat_bufsize = 4096;  // Large enough for strings
+    char *stat_buffer = new char[stat_bufsize];
+    struct statmount *sm = (struct statmount *)stat_buffer;
+
     for(int i = 0; i != ret; ++i) {
-        printf("Mount found: %u\n", mnt_ids[i]);
+        printf("Mount found: %llu\n", mnt_ids[i]);
+        struct mnt_id_req statReq = {
+                .size = sizeof(struct mnt_id_req),
+                .spare = 0,
+                .mnt_id = mnt_ids[i],
+                .param = STATMOUNT_SB_BASIC
+                         | STATMOUNT_MNT_BASIC
+                         | STATMOUNT_PROPAGATE_FROM
+                         | STATMOUNT_MNT_ROOT
+                         | STATMOUNT_MNT_POINT
+                         | STATMOUNT_FS_TYPE
+        };
+
+        memset(stat_buffer, 0, stat_bufsize);
+        auto sret = statmount(&statReq, sm, stat_bufsize, 0);
+
+        if (sret < 0) {
+            printf("statmount failed\n");
+            continue;
+        }
+
+        print_stat(sm);
     }
 
 }
