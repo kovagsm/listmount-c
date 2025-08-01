@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <syscall.h>
 #include <sys/fcntl.h>
-#include <cstdio>
+#include <stdio.h>
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -76,30 +76,30 @@ struct elem_list_data {
 };
 
 struct elem_list {
-    elem_list_data* elems;
+    struct elem_list_data* elems;
     int             pos;
     int             size;
 };
 
-elem_list* elem_list_new(int size = 256) {
-    elem_list * ret;
-    ret = (elem_list*)malloc(sizeof(elem_list));
-    ret->elems = (elem_list_data*)malloc(size * sizeof(elem_list_data));
+struct elem_list* elem_list_new(int size) {
+    struct elem_list * ret;
+    ret = (struct elem_list*)malloc(sizeof(struct elem_list));
+    ret->elems = (struct elem_list_data*)malloc(size * sizeof(struct elem_list_data));
     ret->size = size;
     ret->pos = 0;
 
     return ret;
 }
 
-void elem_list_del(elem_list *l) {
+void elem_list_del(struct elem_list *l) {
     free(l->elems);
     free(l);
 }
 
-void elem_list_add(elem_list *l, uint64_t inode, int fd) {
+void elem_list_add(struct elem_list *l, uint64_t inode, int fd) {
     if(l->pos == l->size) {
         l->size *= 2;
-        (void)realloc(l->elems, l->size * sizeof(elem_list_data));
+        (void)realloc(l->elems, l->size * sizeof(struct elem_list_data));
     }
 
     l->elems[l->pos].inode = inode;
@@ -107,7 +107,7 @@ void elem_list_add(elem_list *l, uint64_t inode, int fd) {
     l->pos++;
 }
 
-int elem_list_inode_exists(elem_list *l, uint64_t inode) {
+int elem_list_inode_exists(struct elem_list *l, uint64_t inode) {
     int i = 0;
     for(; i!= l->pos; ++i) {
         if (l->elems[i].inode == inode) {
@@ -222,7 +222,7 @@ void list_mounts_for_ns(int fd) {
     }
 
     const size_t stat_bufsize = 4096;  // Large enough for strings
-    char *stat_buffer = new char[stat_bufsize];
+    char *stat_buffer = malloc(sizeof(char) * stat_bufsize);
     struct statmount *sm = (struct statmount *)stat_buffer;
 
     for(int i = 0; i != ret; ++i) {
@@ -250,10 +250,15 @@ void list_mounts_for_ns(int fd) {
         print_stat(sm);
     }
 
+    free(stat_buffer);
+
 }
 
-void list_all_proc(char * proc = "/proc") {
-    elem_list* e = elem_list_new();
+void list_all_proc(char * proc) {
+    if(proc == NULL) {
+       proc = "/proc";
+    }
+    struct elem_list* e = elem_list_new(256);
 
     int fd = syscall(SYS_open, proc, O_RDONLY | O_DIRECTORY);
     if (fd == -1) {
@@ -295,5 +300,5 @@ void list_all_proc(char * proc = "/proc") {
 
 
 int main() {
-    list_all_proc();
+    list_all_proc(NULL);
 }
